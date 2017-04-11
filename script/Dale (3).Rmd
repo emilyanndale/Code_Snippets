@@ -1,0 +1,236 @@
+---
+title: "Assignment 4"
+author: "Emily Dale"
+date: "April 9, 2017"
+output: html_document
+---
+# Case Study: Book Displays at Flourish and Blotts
+
+## Background
+The purpose of this analysis is to determine which books should be displayed together at Flourish and Blotts. By examining patterns in previous transactions and association rules, I will be able to make a recommendation to the manager of the bookstore on an ideal book display.
+
+# Data Preparation 
+
+### Bring in Data
+
+The data is brought into the environment. Duplicates (for example, one customer buying multiple copies of the same book) are removed.
+
+
+```{r setup}
+knitr::opts_knit$set(root.dir = 'C:/Users/eaust/OneDrive/Documents/R/Week4/ADMWeek4/data')
+```
+
+
+```{r}
+library(arules)
+bookbaskets <- read.transactions("bookdata.tsv.gz", format="single",  
+                                 sep="\t",                    	 
+                                 cols=c("userid", "title"),    	
+                                 rm.duplicates=T)       
+
+```
+The distribution of these transactions seems suspect. 1 customer purchased 891 books, 1 purchased 260, and 2 purchased 206. These IDs may not be accurate, and may instead be guest IDs, online orders, employee IDs, etc. As these large purchases may skew the data, I have decided to remove orders with more than 200 purchases. Since we are studying association rules, baskets with only 1 book should also be removed.
+
+
+
+```{r}
+basketSizes<-size(bookbaskets)
+bookbasket_use<-bookbaskets[basketSizes>1 & basketSizes < 200]
+```
+
+
+
+Next, I examine the data. I first look at the first five transactions and the size and frequency of all transactions. Next I get the count of the total number of books purchased and remove any transactions where only one book was purchased.
+```{r}
+inspect(bookbasket_use[1:5]) 
+basketSizes<-size(bookbasket_use)
+bookFreq<-itemFrequency(bookbasket_use) 
+
+
+bookCount <- (bookFreq/sum(bookFreq))*sum(basketSizes) 
+
+```
+
+
+# Examining the Transactions
+
+First, I will calculate the support, or frequency, of the books. I first put the frequency in a dataframe.
+```{r}
+freq_book_data_frame <- as.data.frame(itemFrequency(bookbasket_use))
+#View(freq_book_data_frame)
+```
+### Best Sellers
+By looking at the frequency of books purchased, I can get a better picture of the books that are best sellers. Let's look at the top 10 best sellers.
+
+```{r}
+itemFrequencyPlot(bookbasket_use, topN=10)
+```
+"Wild Animus" seems to be the book with the most support. The manager of the bookstore would like to exclude this book, so later in this analysis it will be removed. Because this plot is showing support, this means that The Lovely Bones is shown in approximately 2% of transactions, The Secret Life of Bees in 1.5%, and so on.
+
+# Association Rules Algorithm
+Next I will begin examining assocation rules of these transactions using the apriori algorithm. This algorithm uses the "bottom up" approach: it looks for the most frequent items first, then looks for the most frequent pairs of items, then triplets, etc. It will generate rules based on these frequencies.
+
+### Parameter settings
+The default settings for apriori are support= 0.1 (frequency of 10%), confidence = 0.8 (rule is correct 80% of the time), max length = 10 (max number of items in a list is 10), and min length = 1 (minimum number of items in a list is 1). As we saw in the previous plots, none of the books appeared in more than 4% of purchases, so the default settings for this algorithm will yield zero results. Let's try it to verify.
+```{r}
+bookbaskets_noAnimus <- apriori(bookbaskets,appearance = list(none = c("Wild Animus")))
+```
+
+As suspected, there are no rules available. 
+
+Next, let's try with different parameters. I would like to see rules that involve books with support of 1%, confidence of 70%, and will leave min and max the same for now. Again, "Wild Animus" is excluded.
+
+```{r}
+apriori(bookbasket_use, parameter = list(support =0.01, confidence = 0.7), appearance = list(none = c("Wild Animus")))
+
+```
+
+Unfortunately, there are still no rules. I will again lower the minimum standards. I will now look at rules that have books with .1% support, 80% confidence, and a minimum length of 3. 
+
+```{r}
+book_rules <- apriori(bookbasket_use, parameter = list(support =0.001, confidence = 0.80, minlen = 3), appearance = list(none = c("Wild Animus")))
+print(book_rules)
+```
+
+94 rules were created! Let's start examining the rules.
+
+#Rules
+
+```{r}
+summary(book_rules)
+```
+* This summary shows basic information about the 94 rules:
++ 60 rules have 3 items each
++ 30 rules have 4 items each
++ 4 rules have 5 items each
++ Support ranges from .1% to .36%
++ Confidence ranges from 80% to 100%. We should look at the rules with 100% confidence.
++ Lift (more on that below) ranges from 60-575.
+
+### More on Lift
+Lift helps us describe the impact of these rules. If we had two books that had a lift of 85, placing them together would make the likelihood of customers purchasing them together increase by 85%. This makes the highest lift of 575 even that much more intriguing! Let's look at those rules with the highest lift.
+
+```{r}
+bookrules_liftsort <- sort(book_rules, by = "lift")
+inspect(bookrules_liftsort[1:5])
+```
+These rules, while high in lift, are not particularly interesting as they are all part of the "Left Behind" series. As the manager has stated, my recommendation shouldn't include books in a series, as it's a given that they should be displayed together.
+
+Next, let's inspect the rules by their support.
+
+```{r}
+bookrules_supportsort <- sort(book_rules, by = "support")
+inspect(bookrules_supportsort[1:5])
+```
+Again, these are all part of a series of books by J.K. Rowling. While these should be of particular interest to Flourish and Blotts given their subject matter, these rules should not be in the recommendation.
+
+Next, let's look at rules sorted by confidence.
+
+```{r}
+bookrules_consort <- sort(book_rules, by = "confidence")
+inspect(bookrules_consort[1:5])
+```
+Since these are again all parts of series, this is also not of interest. The goal is to maximize confidence, lift, and support in books that are not part of a series.
+
+After further inspection, every one of these 94 rules involves series. This is not what the manager will want to see! I will now go back and come up with the rules again, but this time I will exclude the rules involving series by manually looking at the rules.
+
+
+```{r}
+book_rules3 <- apriori(bookbasket_use, parameter = list(support =0.0005, confidence = 0.75, minlen = 3), appearance = list(none = c("Wild Animus")))
+print(book_rules3)
+
+```
+
+# Rules Analysis
+
+
+![Examining Rules](C:/Users/eaust/OneDrive/Documents/R/Week4/ADMWeek4/data/Rules.png)
+
+
+* After going through the 1330 rules, I was able to find rules that didn't exclusively include series:
++ Harry Potter and the Lord of the Rings: while these are both series, customers who purchased books from one series were more likely to also purchase books from the other. These series should be displayed together for maximum exposure.
++ The Catcher in the Rye also had an assocation with the Harry Potter series, specifically the first two books. Customers who purchased The Catcher in the Rye and either the first or second HP book respectivally were more likely to purchase the second or first Harry Potter book respectivally.
++ When displayed with the Vampire Hunter series by Laurell Hamilton, we can expect Blue Moon to have 635 times more likelihood of being purchased. A great way to display this is by having a "If you liked the Vampire Hunter Series, you'll love this!" type of display set up to advertise Blue Moon. They are both science fiction books involving immortals, so it makes sense that readers of one would like the other.
++ While not exactly a series, Dan Brown novels should be displayed together. 
++ 77% of customers who purchased The Secret Life of Bees and While I was Gone (two popular novels) also purchased The Lovely Bones, also a popular novel. All three are also popular book club books.
+
+
+# Book Clubs
+Next, I will only look for rules that include books from popular book clubs, such as Oprah's Book Club. Below I have narrowed down the list to 25 books that have appeared on the Oprah's Book Club list or that may be popular in the future. For example, The Witness for the Prosecution will become a movie in 2018, making it a more appealing choice for book clubs. Night by Elie Wiesel may be another popular choice, as the 1st anniversary of his death will be this coming summer.
+
+I will first inspect the top ten books by support.
+```{r}
+bookclub = apriori(bookbasket_use,
+                        parameter = list(
+                          support = 0.0001,
+                          confidence = 0.85,
+                          minlen = 2,
+                          maxlen = 10
+                          ),
+                        appearance = list(lhs = 
+                                            c("The Lovely Bones: A Novel",
+                                  "She's Come Undone",
+                                  "The Secret Life of Bees",
+                                  "White Oleander : A Novel",
+                                  "Girl with a Pearl Earring", 
+                                  "Where The Heart Is",
+                                  "The Joy Luck Club", 
+                                  "The Pilot's Wife : A Novel", 
+                                  "I Know This Much Is True", 
+                                  "While I Was Gone", 
+                                  "Stones From the River", 
+                                  "Jewel", 
+                                  "The Deep End of the Ocean",
+                                  "A Map of the World",
+                                  "Here On Earth",
+                                  "Black and Blue",
+                                  "Love in the Time of Cholera",
+                                  "Vinegar Hill",
+                                  "Songs in Ordinary Time",
+                                  "A Lesson Before Dying",
+                                  "The Rapture of Canaan",
+                                  "East of Eden",
+                                  "Night",
+                                  "Ruby",
+                                  "The Witness for the Prosecution and Other Stories",
+                                  "White Oleander"), default = "rhs")
+)
+
+
+
+bookclub_sorted <- sort(bookclub, by = "support")
+inspect(bookclub_sorted[1:10])
+
+```
+It looks like The Reader, Drowning Ruth, and The Poisonwood Bible are all popular choices with customers who have purchased book club novels.
+
+Now, let's look at confidence.
+```{r}
+bookclub_sorted2 <- sort(bookclub, by = "confidence")
+inspect(bookclub_sorted2[1:10])
+```
+Again, The Reader, Drowning Ruth, and The Poisonwood Bible are popular choices, in addition to House of Sand and Fog.
+
+Finally, I will look at lift.
+
+```{r}
+bookclub_sorted3 <- sort(bookclub, by = "lift")
+inspect(bookclub_sorted3[1:10])
+```
+Gap Creek: The Story of A Marriage tops the list, followed by Icy Sparks and a string of The Book of Ruth. 
+
+# Book Club Recommendations
+
+I highly recommend displaying the most popular book club novels: The Lovely Bones, She's Come Undone, The Secret Life of Bees, WHile I Was Gone, White Oleander, Where The Heart Is, and Jewel. In addition, I would display The Reader, Drowning Ruth, The Poisonwood Bible, and The Book of Ruth close to the above books to appeal to the customers that read book club novels.
+
+
+# Final Recommendations
+*Here is a summary of all recommendations for Flourish and Blotts for the summer season:
++Display the Harry Potter and Lord of the Rings near each other to advertise to customers that may be interested in both.
++Catcher in the Rye should be close to Harry Potter.
++Create a "If you liked that, you'll love this!" display for the Vampire Hunter series and Blue Moon.
++The Lovely Bones, She's Come Undone, The Secret Life of Bees, WHile I Was Gone, White Oleander, Where The Heart Is, and Jewel should all be displayed near the front of the store together to appeal to book club members. The Reader, Drowning Ruth, The Poisonwood Bible, and The Book of Ruth should be scattered throughout the book club display to appeal to that customer segment. 
+
+
+
+

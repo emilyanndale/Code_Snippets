@@ -1,6 +1,16 @@
+---
+title: 'Case Study: Predicting RUBs'
+author: "Emily Dale"
+date: "May 10, 2017"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
 // Set working directory in R Markdown
-
-
 ```{r setup, include=FALSE}
 knitr::opts_knit$set(root.dir = '/tmp')
 ```

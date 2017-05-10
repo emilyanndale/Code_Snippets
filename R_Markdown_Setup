@@ -1,0 +1,6 @@
+// Set working directory in R Markdown
+
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '/tmp')
+```
